@@ -1,4 +1,4 @@
-import cv2
+from skimage.transform import resize
 import gym
 import numpy as np
 from gym.spaces.box import Box
@@ -17,8 +17,8 @@ def _process_frame42(frame):
     # Resize by half, then down to 42x42 (essentially mipmapping). If
     # we resize directly we lose pixels that, when mapped to 42x42,
     # aren't close enough to the pixel boundary.
-    frame = cv2.resize(frame, (80, 80))
-    frame = cv2.resize(frame, (42, 42))
+    frame = resize(frame, (80, 80))
+    frame = resize(frame, (42, 42))
     frame = frame.mean(2, keepdims=True)
     frame = frame.astype(np.float32)
     frame *= (1.0 / 255.0)

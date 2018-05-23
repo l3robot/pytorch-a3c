@@ -1,11 +1,15 @@
+import os
+
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 
-from envs import create_atari_env
+from backends import create_atari_env, create_unity3d_env
 from model import ActorCritic
 
+
+UNITYFOLDER = "/mnt/unity3d/"
 
 def ensure_shared_grads(model, shared_model):
     for param, shared_param in zip(model.parameters(),
@@ -18,8 +22,20 @@ def ensure_shared_grads(model, shared_model):
 def train(rank, args, shared_model, counter, lock, optimizer=None):
     torch.manual_seed(args.seed + rank)
 
-    env = create_atari_env(args.env_name)
-    env.seed(args.seed + rank)
+    backend, env_name = args.env_name.split(':')
+
+    if backend == 'unity3d':
+        os.chdir('/mnt/code/')
+        env = create_unity3d_env(train_mode=False,\
+         file_name=os.path.join(UNITYFOLDER, env_name), \
+         worker_id=rank, seed=args.seed + rank, \
+         docker_training=True)
+    elif backend == 'gym':
+        env = create_atari_env(env_name)
+        env.seed(args.seed + rank)
+    else:
+        print(f' [!]: {backend} is not a valid backend')
+        raise ValueError
 
     model = ActorCritic(env.observation_space.shape[0], env.action_space)
 
@@ -29,7 +45,7 @@ def train(rank, args, shared_model, counter, lock, optimizer=None):
     model.train()
 
     state = env.reset()
-    state = torch.from_numpy(state)
+    state = torch.from_numpy(state).float()
     done = True
 
     episode_length = 0
@@ -71,7 +87,7 @@ def train(rank, args, shared_model, counter, lock, optimizer=None):
                 episode_length = 0
                 state = env.reset()
 
-            state = torch.from_numpy(state)
+            state = torch.from_numpy(state).float()
             values.append(value)
             log_probs.append(log_prob)
             rewards.append(reward)
@@ -105,7 +121,7 @@ def train(rank, args, shared_model, counter, lock, optimizer=None):
         optimizer.zero_grad()
 
         (policy_loss + args.value_loss_coef * value_loss).backward()
-        torch.nn.utils.clip_grad_norm(model.parameters(), args.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
         ensure_shared_grads(model, shared_model)
         optimizer.step()

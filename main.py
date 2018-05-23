@@ -7,7 +7,7 @@ import torch
 import torch.multiprocessing as mp
 
 import my_optim
-from envs import create_atari_env
+from backends import create_atari_env, create_unity3d_env
 from model import ActorCritic
 from test import test
 from train import train
@@ -36,11 +36,15 @@ parser.add_argument('--num-steps', type=int, default=20,
                     help='number of forward steps in A3C (default: 20)')
 parser.add_argument('--max-episode-length', type=int, default=1000000,
                     help='maximum length of an episode (default: 1000000)')
-parser.add_argument('--env-name', default='PongDeterministic-v4',
+parser.add_argument('--env-name', default='gym:PongDeterministic-v4',
                     help='environment to train on (default: PongDeterministic-v4)')
+parser.add_argument('--name', default='test', type=str,
+                    help='name of experiment')
 parser.add_argument('--no-shared', default=False,
                     help='use an optimizer without shared momentum.')
 
+
+UNITYFOLDER = "/mnt/unity3d/"
 
 if __name__ == '__main__':
     os.environ['OMP_NUM_THREADS'] = '1'
@@ -49,10 +53,25 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
-    env = create_atari_env(args.env_name)
-    shared_model = ActorCritic(
-        env.observation_space.shape[0], env.action_space)
+
+    backend, env_name = args.env_name.split(':')
+
+    if backend == 'unity3d':
+        os.chdir('/mnt/code/')
+        env = create_unity3d_env(train_mode=False,\
+         file_name=os.path.join(UNITYFOLDER, env_name), \
+         worker_id=0, seed=args.seed, \
+         docker_training=True)
+    elif backend == 'gym':
+        env = create_atari_env(env_name)
+    else:
+        print(f' [!]: {backend} is not a valid backend')
+        raise ValueError
+
+    shared_model = ActorCritic(env.observation_space.shape[0], env.action_space)
     shared_model.share_memory()
+
+    env.close()
 
     if args.no_shared:
         optimizer = None
@@ -65,7 +84,7 @@ if __name__ == '__main__':
     counter = mp.Value('i', 0)
     lock = mp.Lock()
 
-    p = mp.Process(target=test, args=(args.num_processes, args, shared_model, counter))
+    p = mp.Process(target=test, args=(args.name, backend, os.path.join(UNITYFOLDER, env_name), args.num_processes, args, shared_model, counter, True))
     p.start()
     processes.append(p)
 
